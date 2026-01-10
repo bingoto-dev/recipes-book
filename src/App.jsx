@@ -1,14 +1,32 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import RecipeGrid from './components/RecipeGrid'
 import AddRecipe from './components/AddRecipe'
 import RecipeModal from './components/RecipeModal'
 import { mockRecipes } from './data/mockRecipes'
 
+// Load recipes from localStorage or use mock data
+const loadRecipes = () => {
+  try {
+    const saved = localStorage.getItem('recipes')
+    if (saved) {
+      return JSON.parse(saved)
+    }
+  } catch (e) {
+    console.error('Failed to load recipes:', e)
+  }
+  return mockRecipes
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState('recipes')
-  const [recipes, setRecipes] = useState(mockRecipes)
+  const [recipes, setRecipes] = useState(loadRecipes)
   const [selectedRecipe, setSelectedRecipe] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+
+  // Save recipes to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('recipes', JSON.stringify(recipes))
+  }, [recipes])
 
   const handleRecipeClick = (recipe) => {
     setSelectedRecipe(recipe)

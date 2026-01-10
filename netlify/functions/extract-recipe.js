@@ -41,13 +41,37 @@ If the content doesn't contain a recipe, return: {"error": "No recipe found"}
 Content:
 `;
 
-// Check if URL is a YouTube video
-function isYouTubeUrl(url) {
-  return (
-    url.includes("youtube.com/watch") ||
-    url.includes("youtu.be/") ||
-    url.includes("youtube.com/shorts")
-  );
+const FIND_RECIPE_LINK_PROMPT = `Analyze this webpage content. It seems to be an overview or social media post that references a recipe.
+
+Look for:
+1. Links to a full recipe page (often contains words like "recipe", "full recipe", "get the recipe", "link in bio")
+2. URLs mentioned in the text
+3. Recipe website domains (allrecipes, foodnetwork, budgetbytes, etc.)
+
+Return ONLY a JSON object with this structure:
+{"recipeUrl": "https://the-recipe-url.com/recipe" }
+
+If you find a recipe URL, return it. If you can't find any recipe link, return:
+{"recipeUrl": null}
+
+Content:
+`;
+
+// Check URL type
+function getUrlType(url) {
+  if (url.includes("youtube.com/watch") || url.includes("youtu.be/") || url.includes("youtube.com/shorts")) {
+    return "youtube";
+  }
+  if (url.includes("instagram.com")) {
+    return "instagram";
+  }
+  if (url.includes("tiktok.com")) {
+    return "tiktok";
+  }
+  if (url.includes("pinterest.com") || url.includes("pin.it")) {
+    return "pinterest";
+  }
+  return "website";
 }
 
 // Extract video ID from YouTube URL
@@ -69,28 +93,23 @@ async function getYouTubeTranscript(videoId) {
     return transcript.map((item) => item.text).join(" ");
   } catch (error) {
     console.log("Transcript error:", error.message);
-    return null; // Return null instead of throwing - we'll try fallback
+    return null;
   }
 }
 
-// Fallback: Get YouTube video description and metadata from page
+// Get YouTube video description and metadata from page
 async function getYouTubePageContent(videoId) {
   try {
     const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept-Language": "en-US,en;q=0.9",
       },
     });
     const html = await response.text();
-
     let content = "";
 
-    // Try to extract from ytInitialPlayerResponse JSON
-    const playerResponseMatch = html.match(
-      /ytInitialPlayerResponse\s*=\s*(\{.+?\});/s
-    );
+    const playerResponseMatch = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});/s);
     if (playerResponseMatch) {
       try {
         const playerData = JSON.parse(playerResponseMatch[1]);
@@ -98,50 +117,15 @@ async function getYouTubePageContent(videoId) {
         if (videoDetails) {
           content += `Title: ${videoDetails.title || ""}\n`;
           content += `Description: ${videoDetails.shortDescription || ""}\n`;
-          content += `Channel: ${videoDetails.author || ""}\n`;
         }
-      } catch (e) {
-        console.log("Could not parse player response");
-      }
+      } catch (e) {}
     }
 
-    // Try ytInitialData for more details
-    const initialDataMatch = html.match(/ytInitialData\s*=\s*(\{.+?\});/s);
-    if (initialDataMatch) {
-      try {
-        const initialData = JSON.parse(initialDataMatch[1]);
-        // Try to find description in engagement panels
-        const panels =
-          initialData?.engagementPanels || [];
-        for (const panel of panels) {
-          const content_panel =
-            panel?.engagementPanelSectionListRenderer?.content
-              ?.structuredDescriptionContentRenderer?.items;
-          if (content_panel) {
-            for (const item of content_panel) {
-              if (item?.expandableVideoDescriptionBodyRenderer?.attributedDescriptionBodyText?.content) {
-                content += `\nFull Description: ${item.expandableVideoDescriptionBodyRenderer.attributedDescriptionBodyText.content}\n`;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.log("Could not parse initial data");
-      }
-    }
-
-    // Fallback: Extract from meta tags
     const descMeta = html.match(/<meta\s+name="description"\s+content="([^"]+)"/i);
     if (descMeta && !content.includes("Description:")) {
       content += `Description: ${descMeta[1]}\n`;
     }
 
-    const titleMeta = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i);
-    if (titleMeta && !content.includes("Title:")) {
-      content = `Title: ${titleMeta[1]}\n` + content;
-    }
-
-    console.log(`Extracted YouTube content preview: ${content.slice(0, 200)}...`);
     return content || null;
   } catch (error) {
     console.log("Page content error:", error.message);
@@ -149,19 +133,210 @@ async function getYouTubePageContent(videoId) {
   }
 }
 
-// Fetch YouTube video title
+// Fetch YouTube video info
 async function getYouTubeVideoInfo(videoId) {
   try {
     const response = await fetch(
       `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
     );
+    if (response.ok) return await response.json();
+  } catch (e) {}
+  return null;
+}
+
+// Fetch Instagram content (try oEmbed and page scraping)
+async function getInstagramContent(url) {
+  console.log("Fetching Instagram content...");
+
+  // Try oEmbed first
+  try {
+    const oembedUrl = `https://api.instagram.com/oembed?url=${encodeURIComponent(url)}`;
+    const response = await fetch(oembedUrl);
     if (response.ok) {
-      return await response.json();
+      const data = await response.json();
+      console.log("Got Instagram oEmbed data");
+      return {
+        content: `Title: ${data.title || ""}\nAuthor: ${data.author_name || ""}\nCaption: ${data.title || ""}`,
+        thumbnail: data.thumbnail_url,
+      };
     }
   } catch (e) {
-    console.log("Could not fetch video info");
+    console.log("Instagram oEmbed failed:", e.message);
   }
-  return null;
+
+  // Try direct page fetch with headers
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+    const html = await response.text();
+
+    // Extract from meta tags
+    let content = "";
+    const descMatch = html.match(/<meta\s+(?:property="og:description"|name="description")\s+content="([^"]+)"/i);
+    const titleMatch = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i);
+    const imageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+
+    if (titleMatch) content += `Title: ${titleMatch[1]}\n`;
+    if (descMatch) content += `Caption: ${descMatch[1]}\n`;
+
+    // Try to find JSON data in the page
+    const jsonMatch = html.match(/"caption":\s*\{"text":\s*"([^"]+)"/);
+    if (jsonMatch) {
+      content += `Full Caption: ${jsonMatch[1]}\n`;
+    }
+
+    // Look for any URLs in the content that might be recipe links
+    const urlMatches = html.match(/https?:\/\/[^\s"<>]+/g) || [];
+    const recipeUrls = urlMatches.filter(u =>
+      u.includes("recipe") ||
+      u.includes("allrecipes") ||
+      u.includes("foodnetwork") ||
+      u.includes("budgetbytes") ||
+      u.includes("seriouseats") ||
+      u.includes("bonappetit")
+    );
+    if (recipeUrls.length > 0) {
+      content += `\nRecipe Links Found: ${recipeUrls.join(", ")}\n`;
+    }
+
+    console.log(`Got Instagram page content (${content.length} chars)`);
+    return {
+      content: content || null,
+      thumbnail: imageMatch ? imageMatch[1] : null,
+    };
+  } catch (e) {
+    console.log("Instagram page fetch failed:", e.message);
+  }
+
+  return { content: null, thumbnail: null };
+}
+
+// Fetch TikTok content
+async function getTikTokContent(url) {
+  console.log("Fetching TikTok content...");
+
+  try {
+    // Try oEmbed
+    const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`;
+    const response = await fetch(oembedUrl);
+    if (response.ok) {
+      const data = await response.json();
+      console.log("Got TikTok oEmbed data");
+      return {
+        content: `Title: ${data.title || ""}\nAuthor: ${data.author_name || ""}`,
+        thumbnail: data.thumbnail_url,
+      };
+    }
+  } catch (e) {
+    console.log("TikTok oEmbed failed:", e.message);
+  }
+
+  return { content: null, thumbnail: null };
+}
+
+// Fetch Pinterest content
+async function getPinterestContent(url) {
+  console.log("Fetching Pinterest content...");
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+    const html = await response.text();
+
+    let content = "";
+    const descMatch = html.match(/<meta\s+(?:property="og:description"|name="description")\s+content="([^"]+)"/i);
+    const titleMatch = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i);
+    const imageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+
+    if (titleMatch) content += `Title: ${titleMatch[1]}\n`;
+    if (descMatch) content += `Description: ${descMatch[1]}\n`;
+
+    // Pinterest often has recipe links
+    const urlMatches = html.match(/https?:\/\/[^\s"<>]+/g) || [];
+    const recipeUrls = urlMatches.filter(u =>
+      !u.includes("pinterest") &&
+      (u.includes("recipe") || u.includes(".com/"))
+    );
+    if (recipeUrls.length > 0) {
+      content += `\nLinked URLs: ${recipeUrls.slice(0, 5).join(", ")}\n`;
+    }
+
+    console.log(`Got Pinterest content (${content.length} chars)`);
+    return {
+      content: content || null,
+      thumbnail: imageMatch ? imageMatch[1] : null,
+    };
+  } catch (e) {
+    console.log("Pinterest fetch failed:", e.message);
+  }
+
+  return { content: null, thumbnail: null };
+}
+
+// Fetch regular webpage
+async function fetchWebpage(url) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+  const html = await response.text();
+
+  // Also extract all links for potential recipe page discovery
+  const links = [];
+  const linkMatches = html.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([^<]*)</gi);
+  for (const match of linkMatches) {
+    links.push({ url: match[1], text: match[2] });
+  }
+
+  const textContent = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Extract image
+  const imageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+
+  return {
+    content: textContent,
+    links,
+    image: imageMatch ? imageMatch[1] : null,
+  };
+}
+
+// Clean JSON response (remove markdown code blocks)
+function cleanJsonResponse(text) {
+  // Remove markdown code blocks
+  let cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  return cleaned;
+}
+
+// Ask AI to find recipe link in content
+async function findRecipeLink(content) {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: FIND_RECIPE_LINK_PROMPT + content.slice(0, 8000) }],
+    });
+    const cleaned = cleanJsonResponse(completion.choices[0].message.content);
+    const result = JSON.parse(cleaned);
+    return result.recipeUrl;
+  } catch (e) {
+    console.log("Could not find recipe link:", e.message);
+    return null;
+  }
 }
 
 async function extractWithOpenAI(textContent, isVideo = false) {
@@ -171,12 +346,7 @@ async function extractWithOpenAI(textContent, isVideo = false) {
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "user",
-        content: prompt + textContent,
-      },
-    ],
+    messages: [{ role: "user", content: prompt + textContent }],
   });
   return completion.choices[0].message.content.trim();
 }
@@ -189,113 +359,101 @@ async function extractWithClaude(textContent, isVideo = false) {
   const message = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 2000,
-    messages: [
-      {
-        role: "user",
-        content: prompt + textContent,
-      },
-    ],
+    messages: [{ role: "user", content: prompt + textContent }],
   });
   return message.content[0].text.trim();
 }
 
 export async function handler(event) {
-  // Only allow POST
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      body: JSON.stringify({ error: "Method not allowed" }),
-    };
+    return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
   }
 
   try {
     const { url } = JSON.parse(event.body);
-
     if (!url) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "URL is required" }),
-      };
+      return { statusCode: 400, body: JSON.stringify({ error: "URL is required" }) };
     }
 
-    let textContent;
+    const urlType = getUrlType(url);
+    console.log(`Processing ${urlType} URL: ${url}`);
+
+    let textContent = "";
     let isVideo = false;
-    let videoInfo = null;
+    let thumbnail = null;
 
-    // Check if it's a YouTube video
-    if (isYouTubeUrl(url)) {
-      console.log("Detected YouTube video, fetching transcript...");
+    // Handle different URL types
+    if (urlType === "youtube") {
       isVideo = true;
-
       const videoId = getYouTubeVideoId(url);
       if (!videoId) {
-        return {
-          statusCode: 400,
-          body: JSON.stringify({ error: "Invalid YouTube URL" }),
-        };
+        return { statusCode: 400, body: JSON.stringify({ error: "Invalid YouTube URL" }) };
       }
 
-      // Get video info and try transcript first
-      videoInfo = await getYouTubeVideoInfo(videoId);
-      let transcript = await getYouTubeTranscript(videoId);
+      const videoInfo = await getYouTubeVideoInfo(videoId);
+      thumbnail = videoInfo?.thumbnail_url || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
 
+      let transcript = await getYouTubeTranscript(videoId);
       if (transcript) {
         textContent = transcript.slice(0, 15000);
-        console.log(
-          `Got transcript (${textContent.length} chars) for: ${videoInfo?.title || videoId}`
-        );
+        console.log(`Got transcript (${textContent.length} chars)`);
       } else {
-        // Fallback to page content if transcript not available
-        console.log("Transcript not available, trying page content fallback...");
         const pageContent = await getYouTubePageContent(videoId);
         if (pageContent) {
           textContent = pageContent.slice(0, 15000);
           console.log(`Got page content (${textContent.length} chars)`);
-        } else {
-          return {
-            statusCode: 400,
-            body: JSON.stringify({
-              error: "Could not extract content from this video. Try a video with captions or a recipe in the description.",
-            }),
-          };
         }
       }
+    } else if (urlType === "instagram") {
+      const igData = await getInstagramContent(url);
+      textContent = igData.content || "";
+      thumbnail = igData.thumbnail;
+    } else if (urlType === "tiktok") {
+      const ttData = await getTikTokContent(url);
+      textContent = ttData.content || "";
+      thumbnail = ttData.thumbnail;
+    } else if (urlType === "pinterest") {
+      const pinData = await getPinterestContent(url);
+      textContent = pinData.content || "";
+      thumbnail = pinData.thumbnail;
     } else {
-      // Regular webpage - fetch HTML
-      const response = await fetch(url);
-      const html = await response.text();
-
-      // Extract text content (strip HTML tags for cleaner input)
-      textContent = html
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 15000);
+      const webData = await fetchWebpage(url);
+      textContent = webData.content.slice(0, 15000);
+      thumbnail = webData.image;
     }
 
-    // Try OpenAI first, fall back to Claude
+    if (!textContent || textContent.length < 50) {
+      const platformMessages = {
+        instagram: "Instagram requires login to view full content. Try pasting the recipe URL from the post's caption or bio link instead.",
+        tiktok: "TikTok content couldn't be accessed. Try pasting the recipe URL from the video description instead.",
+      };
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          error: platformMessages[urlType] || "Could not extract content from this URL. The platform may be blocking access."
+        }),
+      };
+    }
+
+    // First attempt: Try to extract recipe
+    console.log("Trying to extract recipe...");
     let recipeText;
     try {
-      console.log("Trying OpenAI...");
       recipeText = await extractWithOpenAI(textContent, isVideo);
     } catch (openaiError) {
-      console.log("OpenAI failed, trying Claude...", openaiError.message);
+      console.log("OpenAI failed, trying Claude...");
       try {
         recipeText = await extractWithClaude(textContent, isVideo);
       } catch (claudeError) {
-        console.log("Claude also failed:", claudeError.message);
-        throw new Error("Both AI services failed: " + openaiError.message);
+        throw new Error("Both AI services failed");
       }
     }
 
-    // Parse the response
     let recipeData;
     try {
-      recipeData = JSON.parse(recipeText);
+      const cleanedText = cleanJsonResponse(recipeText);
+      recipeData = JSON.parse(cleanedText);
     } catch (e) {
-      // Try to extract JSON from the response if it's wrapped in something
       const jsonMatch = recipeText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         recipeData = JSON.parse(jsonMatch[0]);
@@ -304,40 +462,54 @@ export async function handler(event) {
       }
     }
 
+    // If no recipe found, try to find a recipe link and follow it
+    if (recipeData.error === "No recipe found") {
+      console.log("No recipe found, looking for recipe links...");
+      const recipeUrl = await findRecipeLink(textContent);
+
+      if (recipeUrl && recipeUrl !== url) {
+        console.log(`Found recipe link: ${recipeUrl}, following...`);
+
+        // Fetch the recipe page
+        const webData = await fetchWebpage(recipeUrl);
+        const recipePageContent = webData.content.slice(0, 15000);
+
+        // Try to extract from the recipe page
+        try {
+          recipeText = await extractWithOpenAI(recipePageContent, false);
+          recipeData = JSON.parse(recipeText);
+
+          // Use the recipe page image if available
+          if (webData.image) {
+            thumbnail = webData.image;
+          }
+
+          console.log("Successfully extracted recipe from linked page!");
+        } catch (e) {
+          console.log("Could not extract from linked page:", e.message);
+        }
+      }
+    }
+
     if (recipeData.error) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: recipeData.error }),
-      };
+      return { statusCode: 400, body: JSON.stringify({ error: recipeData.error }) };
     }
 
     // Add metadata
     recipeData.id = Date.now();
     recipeData.sourceUrl = url;
-    recipeData.image = `https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&h=800&fit=crop`;
-
-    // If it's a YouTube video, use thumbnail as image
-    if (isVideo && videoInfo) {
-      recipeData.image =
-        videoInfo.thumbnail_url ||
-        `https://img.youtube.com/vi/${getYouTubeVideoId(url)}/maxresdefault.jpg`;
-    }
+    recipeData.image = thumbnail || "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&h=800&fit=crop";
 
     return {
       statusCode: 200,
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(recipeData),
     };
   } catch (error) {
     console.error("Error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({
-        error: "Failed to extract recipe",
-        details: error.message,
-      }),
+      body: JSON.stringify({ error: "Failed to extract recipe", details: error.message }),
     };
   }
 }
