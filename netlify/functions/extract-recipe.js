@@ -70,6 +70,18 @@ If you cannot find a SPECIFIC recipe URL (only landing pages or no links), retur
 Content:
 `;
 
+const EXTRACT_DISH_NAME_PROMPT = `From this social media post content, extract the name of the dish or recipe being shown.
+
+Return ONLY a JSON object:
+{"dishName": "the dish name", "websiteDomain": "example.com or null if not found"}
+
+Examples:
+- "This Tuscan chicken orzo is amazing! Link in bio @barleyandsage" -> {"dishName": "Tuscan chicken orzo", "websiteDomain": "barleyandsage.com"}
+- "Made my famous chocolate cake today" -> {"dishName": "chocolate cake", "websiteDomain": null}
+
+Content:
+`;
+
 // Check URL type
 function getUrlType(url) {
   if (url.includes("youtube.com/watch") || url.includes("youtu.be/") || url.includes("youtube.com/shorts")) {
@@ -352,6 +364,86 @@ async function findRecipeLink(content) {
   }
 }
 
+// Extract dish name from social media content
+async function extractDishInfo(content) {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: EXTRACT_DISH_NAME_PROMPT + content.slice(0, 4000) }],
+    });
+    const cleaned = cleanJsonResponse(completion.choices[0].message.content);
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.log("Could not extract dish name:", e.message);
+    return { dishName: null, websiteDomain: null };
+  }
+}
+
+// Search a website for a specific recipe
+async function searchWebsiteForRecipe(domain, dishName) {
+  console.log(`Searching ${domain} for "${dishName}"...`);
+  try {
+    // Try common search URL patterns
+    const searchUrls = [
+      `https://${domain}/?s=${encodeURIComponent(dishName)}`,
+      `https://www.${domain}/?s=${encodeURIComponent(dishName)}`,
+      `https://${domain}/search?q=${encodeURIComponent(dishName)}`,
+    ];
+
+    // Helper to check if URL is a valid recipe page (not an image/asset)
+    const isValidRecipeUrl = (url) => {
+      const lower = url.toLowerCase();
+      // Reject image and asset URLs
+      if (lower.match(/\.(jpg|jpeg|png|gif|webp|svg|css|js|woff|ttf)(\?|$)/)) return false;
+      if (lower.includes('/wp-content/uploads/')) return false;
+      if (lower.includes('/assets/')) return false;
+      if (lower.includes('/images/')) return false;
+      // Should look like a page URL
+      return true;
+    };
+
+    for (const searchUrl of searchUrls) {
+      try {
+        const response = await fetch(searchUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+        });
+
+        if (!response.ok) continue;
+
+        const html = await response.text();
+
+        // Look for recipe URLs in search results - find <a href="..."> links
+        const linkPattern = /<a[^>]+href=["']([^"']+)["'][^>]*>/gi;
+        const dishWords = dishName.toLowerCase().split(' ').filter(w => w.length > 3);
+        let match;
+
+        while ((match = linkPattern.exec(html)) !== null) {
+          const url = match[1];
+          if (!url.includes(domain.replace('www.', ''))) continue;
+          if (!isValidRecipeUrl(url)) continue;
+
+          const urlLower = url.toLowerCase();
+          // Check if URL contains key words from the dish name
+          const matchCount = dishWords.filter(word => urlLower.includes(word)).length;
+          if (matchCount >= 2) {
+            const cleanUrl = url.startsWith('http') ? url : `https://${domain}${url}`;
+            console.log(`Found recipe via search: ${cleanUrl}`);
+            return cleanUrl.replace(/["'<>]/g, '');
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  } catch (e) {
+    console.log("Website search failed:", e.message);
+  }
+  return null;
+}
+
 async function extractWithOpenAI(textContent, isVideo = false) {
   const prompt = isVideo
     ? `This is a transcript from a cooking video. ${RECIPE_PROMPT}`
@@ -478,7 +570,31 @@ export async function handler(event) {
     // If no recipe found, try to find a recipe link and follow it
     if (recipeData.error === "No recipe found") {
       console.log("No recipe found, looking for recipe links...");
-      const recipeUrl = await findRecipeLink(textContent);
+      let recipeUrl = await findRecipeLink(textContent);
+
+      // If no direct link found, try to extract dish name and search for it
+      if (!recipeUrl && (urlType === "instagram" || urlType === "tiktok" || urlType === "pinterest")) {
+        console.log("No direct link, trying to extract dish name and search...");
+        const dishInfo = await extractDishInfo(textContent);
+
+        if (dishInfo.dishName) {
+          console.log(`Extracted dish: "${dishInfo.dishName}", website: ${dishInfo.websiteDomain || "unknown"}`);
+
+          // Try to find the website domain from content if not extracted
+          let domain = dishInfo.websiteDomain;
+          if (!domain) {
+            // Look for common recipe website mentions
+            const domainMatch = textContent.match(/(?:@|link in bio[^a-z]*)?([a-z]+(?:andsage|recipes|kitchen|cooking|eats|food)[a-z]*)/i);
+            if (domainMatch) {
+              domain = domainMatch[1].toLowerCase() + ".com";
+            }
+          }
+
+          if (domain) {
+            recipeUrl = await searchWebsiteForRecipe(domain, dishInfo.dishName);
+          }
+        }
+      }
 
       if (recipeUrl && recipeUrl !== url) {
         console.log(`Found recipe link: ${recipeUrl}, following...`);
@@ -500,8 +616,9 @@ export async function handler(event) {
             // Add the original source and the recipe page link
             recipeData.relatedLinks = [{ title: "Full Recipe", url: recipeUrl }];
 
-            // Use the recipe page image if available
-            if (webData.image) {
+            // Keep the original social media thumbnail (the enticing cover shot)
+            // Only use recipe page image if we don't have one
+            if (!thumbnail && webData.image) {
               thumbnail = webData.image;
             }
 
