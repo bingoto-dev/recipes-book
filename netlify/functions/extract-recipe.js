@@ -41,17 +41,30 @@ If the content doesn't contain a recipe, return: {"error": "No recipe found"}
 Content:
 `;
 
-const FIND_RECIPE_LINK_PROMPT = `Analyze this webpage content. It seems to be an overview or social media post that references a recipe.
+const FIND_RECIPE_LINK_PROMPT = `Analyze this webpage content from a social media post that references a recipe.
+
+Your task: Find the URL to the SPECIFIC recipe page (not a landing page, homepage, or index page).
+
+GOOD recipe URLs look like:
+- https://example.com/recipes/chicken-parmesan
+- https://example.com/2024/01/pasta-recipe
+- URLs containing the recipe name or dish name
+
+BAD URLs to avoid:
+- https://example.com/instagram (landing pages)
+- https://example.com/recipes (index pages without specific recipe)
+- https://example.com (homepages)
+- Social media profile URLs
 
 Look for:
-1. Links to a full recipe page (often contains words like "recipe", "full recipe", "get the recipe", "link in bio")
-2. URLs mentioned in the text
-3. Recipe website domains (allrecipes, foodnetwork, budgetbytes, etc.)
+1. Direct links to full recipe pages with specific dish names in the URL
+2. URLs from recipe websites (allrecipes, foodnetwork, budgetbytes, seriouseats, etc.)
+3. Blog post URLs that contain recipe keywords
 
-Return ONLY a JSON object with this structure:
-{"recipeUrl": "https://the-recipe-url.com/recipe" }
+Return ONLY a JSON object:
+{"recipeUrl": "https://the-recipe-url.com/specific-recipe-name" }
 
-If you find a recipe URL, return it. If you can't find any recipe link, return:
+If you cannot find a SPECIFIC recipe URL (only landing pages or no links), return:
 {"recipeUrl": null}
 
 Content:
@@ -477,14 +490,25 @@ export async function handler(event) {
         // Try to extract from the recipe page
         try {
           recipeText = await extractWithOpenAI(recipePageContent, false);
-          recipeData = JSON.parse(recipeText);
+          const cleanedLinkedText = cleanJsonResponse(recipeText);
+          const linkedRecipeData = JSON.parse(cleanedLinkedText);
 
-          // Use the recipe page image if available
-          if (webData.image) {
-            thumbnail = webData.image;
+          // Only use the linked data if it's actually a recipe (not an error)
+          if (!linkedRecipeData.error) {
+            recipeData = linkedRecipeData;
+
+            // Add the original source and the recipe page link
+            recipeData.relatedLinks = [{ title: "Full Recipe", url: recipeUrl }];
+
+            // Use the recipe page image if available
+            if (webData.image) {
+              thumbnail = webData.image;
+            }
+
+            console.log("Successfully extracted recipe from linked page!");
+          } else {
+            console.log("Linked page also had no recipe");
           }
-
-          console.log("Successfully extracted recipe from linked page!");
         } catch (e) {
           console.log("Could not extract from linked page:", e.message);
         }
@@ -492,7 +516,14 @@ export async function handler(event) {
     }
 
     if (recipeData.error) {
-      return { statusCode: 400, body: JSON.stringify({ error: recipeData.error }) };
+      // Provide helpful error messages based on platform
+      let errorMessage = recipeData.error;
+      if (urlType === "instagram") {
+        errorMessage = "Could not extract recipe from this Instagram post. Instagram limits what we can access. Try copying the recipe link from the post's caption or bio and pasting that directly.";
+      } else if (urlType === "tiktok") {
+        errorMessage = "Could not extract recipe from this TikTok video. Try copying the recipe link from the video description and pasting that directly.";
+      }
+      return { statusCode: 400, body: JSON.stringify({ error: errorMessage }) };
     }
 
     // Add metadata
