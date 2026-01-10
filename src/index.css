@@ -1,0 +1,119 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brown-dark: #4A3728;
+  --brown-medium: #6D4C41;
+  --brown-light: #8D6E63;
+  --cream-dark: #FFF8E7;
+  --cream-light: #FFFBF0;
+  --accent-terracotta: #C4704A;
+  --accent-olive: #7A8450;
+  --accent-gold: #C9A962;
+  --text-dark: #2D2016;
+  --text-muted: #8B7355;
+  --border-color: #E5D9C9;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--cream-dark);
+  color: var(--text-dark);
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: 'Playfair Display', serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cream-dark);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--brown-light);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brown-medium);
+}
+
+/* Header */
+.header-nav {
+  background: linear-gradient(135deg, var(--brown-dark) 0%, var(--brown-medium) 100%);
+  box-shadow: 0 4px 20px rgba(74, 55, 40, 0.15);
+}
+
+/* Recipe card hover effect */
+.recipe-card {
+  background: var(--cream-light);
+  border: 1px solid var(--border-color);
+  transition: all 0.3s ease;
+}
+
+.recipe-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 40px rgba(74, 55, 40, 0.15);
+}
+
+.recipe-card:hover img {
+  transform: scale(1.05);
+}
+
+/* Modal overlay */
+.modal-overlay {
+  animation: fadeIn 0.2s ease-out;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  animation: scaleIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Fade in animation for grid items */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeSlideIn 0.4s ease-out forwards;
+  opacity: 0;
+}
+
+/* Nutrition badge colors - Rustic Cookbook */
+.macro-calories { background: var(--accent-terracotta); }
+.macro-protein { background: var(--accent-olive); }
+.macro-carbs { background: var(--accent-gold); }
+.macro-fat { background: var(--brown-light); }
