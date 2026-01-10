@@ -48,6 +48,11 @@ function App() {
     setActiveTab('recipes')
   }
 
+  const handleUpdateRecipe = (updatedRecipe) => {
+    setRecipes(recipes.map(r => r.id === updatedRecipe.id ? updatedRecipe : r))
+    setSelectedRecipe(updatedRecipe)
+  }
+
   return (
     <div className="min-h-screen bg-[#FFF8E7]">
       {/* Header */}
@@ -104,6 +109,7 @@ function App() {
           recipe={selectedRecipe}
           onClose={handleCloseModal}
           onDelete={handleDeleteRecipe}
+          onUpdate={handleUpdateRecipe}
         />
       )}
     </div>

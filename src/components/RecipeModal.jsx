@@ -1,9 +1,18 @@
 import { useState } from 'react'
 
-function RecipeModal({ recipe, onClose, onDelete }) {
+function RecipeModal({ recipe, onClose, onDelete, onUpdate }) {
   const [activeTab, setActiveTab] = useState('ingredients')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [checkedIngredients, setCheckedIngredients] = useState([])
+  const [personalNotes, setPersonalNotes] = useState(recipe.personalNotes || '')
+  const [isEditingNotes, setIsEditingNotes] = useState(false)
+
+  const handleSaveNotes = () => {
+    if (onUpdate) {
+      onUpdate({ ...recipe, personalNotes })
+    }
+    setIsEditingNotes(false)
+  }
 
   const handleBackdropClick = (e) => {
     if (e.target === e.currentTarget) {
@@ -185,22 +194,49 @@ function RecipeModal({ recipe, onClose, onDelete }) {
               )}
 
               {activeTab === 'notes' && (
-                <div>
-                  <h3 className="font-display text-lg font-semibold text-[#4A3728] mb-4">
-                    Chef's Notes
-                  </h3>
-                  <div className="bg-[#FFF8E7] rounded-xl p-5 border border-[#E5D9C9]">
-                    <p className="text-[#6D4C41] text-sm leading-relaxed italic">
-                      {recipe.description}
-                    </p>
-                    <div className="mt-4 pt-4 border-t border-[#E5D9C9]">
-                      <p className="text-[#8B7355] text-xs">
-                        Cuisine: {recipe.cuisine} • Difficulty: {recipe.difficulty}
-                      </p>
+                <div className="space-y-6">
+                  {/* Personal Notes - Editable */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-display text-lg font-semibold text-[#4A3728]">
+                        My Notes
+                      </h3>
+                      {!isEditingNotes ? (
+                        <button
+                          onClick={() => setIsEditingNotes(true)}
+                          className="text-xs text-[#C4704A] hover:text-[#A85A3A] font-medium"
+                        >
+                          Edit
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleSaveNotes}
+                          className="text-xs bg-[#7A8450] text-white px-3 py-1 rounded-lg hover:bg-[#6A7440]"
+                        >
+                          Save
+                        </button>
+                      )}
                     </div>
+                    {isEditingNotes ? (
+                      <textarea
+                        value={personalNotes}
+                        onChange={(e) => setPersonalNotes(e.target.value)}
+                        placeholder="Add your cooking notes here... (tips, modifications, what worked well)"
+                        className="w-full h-32 p-4 bg-[#FFF8E7] rounded-xl border border-[#E5D9C9] text-[#4A3728] text-sm focus:outline-none focus:ring-2 focus:ring-[#C4704A]/30 resize-none"
+                      />
+                    ) : (
+                      <div className="bg-[#FFF8E7] rounded-xl p-4 border border-[#E5D9C9] min-h-[80px]">
+                        {personalNotes ? (
+                          <p className="text-[#4A3728] text-sm whitespace-pre-wrap">{personalNotes}</p>
+                        ) : (
+                          <p className="text-[#8B7355] text-sm italic">No notes yet. Click Edit to add your cooking notes.</p>
+                        )}
+                      </div>
+                    )}
                   </div>
+
                   {/* Tags */}
-                  <div className="mt-6">
+                  <div>
                     <h4 className="text-sm font-medium text-[#4A3728] mb-3">Tags</h4>
                     <div className="flex flex-wrap gap-2">
                       {recipe.tags.map((tag, index) => (
@@ -212,6 +248,50 @@ function RecipeModal({ recipe, onClose, onDelete }) {
                         </span>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Links */}
+                  <div>
+                    <h4 className="text-sm font-medium text-[#4A3728] mb-3">Links</h4>
+                    <div className="space-y-2">
+                      {recipe.sourceUrl && (
+                        <a
+                          href={recipe.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-[#C4704A] hover:text-[#A85A3A] hover:underline"
+                        >
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                          <span className="truncate">Original Source</span>
+                        </a>
+                      )}
+                      {recipe.relatedLinks && recipe.relatedLinks.map((link, index) => (
+                        <a
+                          key={index}
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-[#C4704A] hover:text-[#A85A3A] hover:underline"
+                        >
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                          <span className="truncate">{link.title || link.url}</span>
+                        </a>
+                      ))}
+                      {!recipe.sourceUrl && (!recipe.relatedLinks || recipe.relatedLinks.length === 0) && (
+                        <p className="text-[#8B7355] text-sm italic">No links available</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Recipe Info */}
+                  <div className="bg-[#FFF8E7] rounded-xl p-4 border border-[#E5D9C9]">
+                    <p className="text-[#8B7355] text-xs">
+                      Cuisine: {recipe.cuisine} • Difficulty: {recipe.difficulty}
+                    </p>
                   </div>
                 </div>
               )}
