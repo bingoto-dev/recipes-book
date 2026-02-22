@@ -1,0 +1,10 @@
+{
+  "name": "Shelf — Offline Reader",
+  "short_name": "Shelf",
+  "description": "Save articles, newsletters, and threads to read offline",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#1c1917",
+  "icons": []
+}

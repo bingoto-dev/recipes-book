@@ -1,115 +1,83 @@
-import { useState, useEffect } from 'react'
-import RecipeGrid from './components/RecipeGrid'
-import AddRecipe from './components/AddRecipe'
-import RecipeModal from './components/RecipeModal'
-import { mockRecipes } from './data/mockRecipes'
-
-// Load recipes from localStorage or use mock data
-const loadRecipes = () => {
-  try {
-    const saved = localStorage.getItem('recipes')
-    if (saved) {
-      return JSON.parse(saved)
-    }
-  } catch (e) {
-    console.error('Failed to load recipes:', e)
-  }
-  return mockRecipes
-}
+import { useState, useEffect, useCallback } from 'react'
+import Library from './components/Library'
+import Reader from './components/Reader'
+import SaveArticle from './components/SaveArticle'
+import { getAllArticles, saveArticle, deleteArticle } from './lib/db'
 
 function App() {
-  const [activeTab, setActiveTab] = useState('recipes')
-  const [recipes, setRecipes] = useState(loadRecipes)
-  const [selectedRecipe, setSelectedRecipe] = useState(null)
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [view, setView] = useState('library')
+  const [articles, setArticles] = useState([])
+  const [currentArticle, setCurrentArticle] = useState(null)
+  const [showSave, setShowSave] = useState(false)
+  const [theme, setTheme] = useState(() => localStorage.getItem('shelf-theme') || 'sepia')
+  const [fontSize, setFontSize] = useState(() => parseInt(localStorage.getItem('shelf-fontsize')) || 20)
+  const [loading, setLoading] = useState(true)
 
-  // Save recipes to localStorage whenever they change
   useEffect(() => {
-    localStorage.setItem('recipes', JSON.stringify(recipes))
-  }, [recipes])
+    getAllArticles().then(all => {
+      setArticles(all.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt)))
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }, [])
 
-  const handleRecipeClick = (recipe) => {
-    setSelectedRecipe(recipe)
-    setIsModalOpen(true)
+  useEffect(() => { localStorage.setItem('shelf-theme', theme) }, [theme])
+  useEffect(() => { localStorage.setItem('shelf-fontsize', fontSize.toString()) }, [fontSize])
+
+  const handleSave = useCallback(async (article) => {
+    await saveArticle(article)
+    setArticles(prev => [article, ...prev])
+    setShowSave(false)
+  }, [])
+
+  const handleDelete = useCallback(async (id) => {
+    await deleteArticle(id)
+    setArticles(prev => prev.filter(a => a.id !== id))
+  }, [])
+
+  const handleRead = useCallback((article) => {
+    setCurrentArticle(article)
+    setView('reader')
+    window.scrollTo(0, 0)
+  }, [])
+
+  const handleBack = useCallback(() => {
+    setView('library')
+    setCurrentArticle(null)
+  }, [])
+
+  if (view === 'reader' && currentArticle) {
+    return (
+      <Reader
+        article={currentArticle}
+        onBack={handleBack}
+        theme={theme}
+        fontSize={fontSize}
+        onThemeChange={setTheme}
+        onFontSizeChange={setFontSize}
+      />
+    )
   }
 
-  const handleCloseModal = () => {
-    setIsModalOpen(false)
-    setSelectedRecipe(null)
-  }
-
-  const handleDeleteRecipe = (recipeId) => {
-    setRecipes(recipes.filter(r => r.id !== recipeId))
-    handleCloseModal()
-  }
-
-  const handleAddRecipe = (newRecipe) => {
-    setRecipes([newRecipe, ...recipes])
-    setActiveTab('recipes')
-  }
-
-  const handleUpdateRecipe = (updatedRecipe) => {
-    setRecipes(recipes.map(r => r.id === updatedRecipe.id ? updatedRecipe : r))
-    setSelectedRecipe(updatedRecipe)
-  }
+  const bg = theme === 'dark' ? 'bg-stone-950 text-stone-200'
+    : theme === 'sepia' ? 'bg-[#f4ecd8] text-stone-900'
+    : 'bg-[#faf7f2] text-stone-900'
 
   return (
-    <div className="min-h-screen bg-[#FFF8E7]">
-      {/* Header */}
-      <header className="header-nav sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <h1 style={{ fontFamily: 'Poppins, sans-serif' }} className="text-3xl font-semibold text-[#FFFBF0]">
-            Lippie & Mathi's Raving Recipes
-          </h1>
-
-          {/* Navigation Tabs */}
-          <nav className="flex gap-3">
-            <button
-              onClick={() => setActiveTab('recipes')}
-              className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
-                activeTab === 'recipes'
-                  ? 'bg-[#C4704A] text-white'
-                  : 'bg-white/15 text-[#FFFBF0] border border-white/30 hover:bg-white/25'
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
-              </svg>
-              My Recipes
-            </button>
-            <button
-              onClick={() => setActiveTab('add')}
-              className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
-                activeTab === 'add'
-                  ? 'bg-[#C4704A] text-white'
-                  : 'bg-white/15 text-[#FFFBF0] border border-white/30 hover:bg-white/25'
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m-7-7h14" />
-              </svg>
-              Add Recipe
-            </button>
-          </nav>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {activeTab === 'recipes' ? (
-          <RecipeGrid recipes={recipes} onRecipeClick={handleRecipeClick} />
-        ) : (
-          <AddRecipe onAddRecipe={handleAddRecipe} />
-        )}
-      </main>
-
-      {/* Recipe Modal */}
-      {isModalOpen && selectedRecipe && (
-        <RecipeModal
-          recipe={selectedRecipe}
-          onClose={handleCloseModal}
-          onDelete={handleDeleteRecipe}
-          onUpdate={handleUpdateRecipe}
+    <div className={`min-h-screen transition-colors duration-300 ${bg}`}>
+      <Library
+        articles={articles}
+        loading={loading}
+        onRead={handleRead}
+        onDelete={handleDelete}
+        onSave={() => setShowSave(true)}
+        theme={theme}
+        onThemeChange={setTheme}
+      />
+      {showSave && (
+        <SaveArticle
+          onSave={handleSave}
+          onClose={() => setShowSave(false)}
+          theme={theme}
         />
       )}
     </div>
